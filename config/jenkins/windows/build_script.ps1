@@ -1,5 +1,4 @@
-# Script to run automated end-to-end tests on Windows platforms
-
+# Script to automatically build plaso dependencies on windows
 
 param (
    [Parameter(Mandatory=$true)]
@@ -41,7 +40,12 @@ foreach ($path in $paths_to_check) {
     }
 }
 if ($patch_exe_path -eq $null) {
+    Write-Host 'Please remember that you have to write a manifest file for patch.exe to be allowed to run on Windows'
+    Write-Host 'See http://ben.versionzero.org/wiki/Fixing_the_way_Vista_Auto-detects_Installers'
     throw 'Unable to find patch.exe'
 }
 
-
+$env:PYTHONPATH='.'
+# This helps build.py figure out what compiler to use
+$env:VS90COMNTOOLS='yesplease'
+& python.exe tools\build.py --preset=plaso msi
