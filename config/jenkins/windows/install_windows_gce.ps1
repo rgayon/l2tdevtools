@@ -21,7 +21,10 @@ mkdir $data_directory
 Write-Host "Downloading $($vc_for_python_url) to $($vc_for_python_path)"
 (New-Object System.Net.WebClient).DownloadFile($vc_for_python_url, $vc_for_python_path)
 Write-Host "Download complete, now installing"
-Start-Process msiexec.exe -Wait -ArgumentList "/i $vc_for_python_path /qn /log C:\log.txt"
+$msiexec_arguments=@"
+/i $($vc_for_python_path) ROOT="$($vs_registry_key_value)" /qn /log C:\log.txt
+"@
+Start-Process msiexec.exe -Wait -ArgumentList $msiexec_arguments
 Write-Host "Installing Microsoft Visual C++ Compiler for Python 2.7... done!"
 
 Write-Host "Adding registry key $($vs_registry_key_path)\productdir with value $($vs_registry_key_value)"
