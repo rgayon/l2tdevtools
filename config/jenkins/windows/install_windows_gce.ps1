@@ -56,3 +56,5 @@ Write-Host 'Adding C:\Program Files\git\bin to PATH'
 Write-Host 'Installing Git... done!'
 
 
+New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"  -Name EnableInstallerDetection -Value 0 -Force
+
