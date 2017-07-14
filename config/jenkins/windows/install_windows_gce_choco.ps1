@@ -53,10 +53,11 @@ echo 'Installing SSHd' | Tee-Object -Append -FilePath $install_log_path
 Choco install openssh -y --force --params '"/SSHServerFeature"' | Tee-Object -Append -FilePath $install_log_path
 echo "Write public key to $($authorized_keys_path) file" | Tee-Object -Append -FilePath $install_log_path
 mkdir $ssh_user_directory
-$pub_key_content >> $authorized_keys_path
+Set-content -Path $authorized_keys_path -Encoding ASCII -Value $pub_key_content
 echo 'Give read access to SSHd' | Tee-Object -Append -FilePath $install_log_path
+
 $Acl = Get-Acl $authorized_keys_path
-$Ar = New-Object system.security.accesscontrol.filesystemaccessrule("NT SERVICES\sshd","Read","Allow")
+$Ar = New-Object system.security.accesscontrol.filesystemaccessrule("NT SERVICE\sshd","Read","Allow")
 $Acl.SetAccessRule($Ar)
 Set-Acl $authorized_keys_path $Acl
 echo "New ACLs for $($authorized_keys_path):" | Tee-Object -Append -FilePath $install_log_path
@@ -68,3 +69,5 @@ mkdir $jenkins_home_directory
 
 # Disable stupid UAC
 New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"  -Name EnableInstallerDetection -Value 0 -Force
+# This needs a reboot to be applied
+Restart-Computer
