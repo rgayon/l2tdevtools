@@ -1,3 +1,4 @@
+
 # Avoid re-running on reboot.
 if (Test-Path -Path $data_directory) {
     Write-Host 'Tools already present, exiting startup script.'
@@ -5,12 +6,9 @@ if (Test-Path -Path $data_directory) {
 }
 
 ## Set up default URLs and Paths
-$data_directory = 'C:\data\'
 $install_log_path = "$($data_directory)\provision.log"
-$jenkins_home_directory = 'C:\jenkins'
 $jenkins_slave_url = 'https://plaso-ci.deerpie.com/jenkins/jnlpJars/slave.jar'
-
-$jenkins_slave_path = "$(jenkins_home_directory)\slave.jar"
+$jenkins_slave_path = "$($jenkins_home_directory)\slave.jar"
 $vc_for_python_url = 'https://download.microsoft.com/download/7/9/6/796EF2E4-801B-4FC4-AB28-B59FBF6D907B/VCForPython27.msi'
 $vc_for_python_path = "$($data_directory)\VCForPython27.msi"
 $vs_registry_key_path = 'HKLM:\Software\Wow6432Node\Microsoft\VisualStudio\9.0\Setup\VC'
@@ -21,48 +19,52 @@ $authorized_keys_path = "$($ssh_user_directory)\authorized_keys"
 
 ## Do the things
 
-mkdir $data_directory >> $provision
+mkdir $data_directory
 
 ## Download & install Visual Studio for Python
-echo "Downloading $($vc_for_python_url) to $($vc_for_python_path)" >> $provision
+echo "Downloading $($vc_for_python_url) to $($vc_for_python_path)" | Tee-Object -Append -FilePath $install_log_path
 (New-Object System.Net.WebClient).DownloadFile($vc_for_python_url, $vc_for_python_path)
-echo 'Download complete, now installing'  >> $provision
+echo 'Download complete, now installing' | Tee-Object -Append -FilePath $install_log_path
 $msiexec_arguments=@"
-/i $($vc_for_python_path) ROOT="$($vs_registry_key_value)" /qn /log $($provision)
+/i $($vc_for_python_path) ROOT="$($vs_registry_key_value)" /qn /L*+ $($install_log_path)
 "@
 Start-Process msiexec.exe -Wait -ArgumentList $msiexec_arguments
-echo "Adding registry key $($vs_registry_key_path)\productdir with value $($vs_registry_key_value)" >> $provision
+echo "Adding registry key $($vs_registry_key_path)\productdir with value $($vs_registry_key_value)" | Tee-Object -Append -FilePath $install_log_path
 New-Item $vs_registry_key_path -Force | New-ItemProperty -Name productdir -Value $vs_registry_key_value -Force
-echo 'Installing Microsoft Visual C++ Compiler for Python 2.7... done!' >> $provision
+echo 'Installing Microsoft Visual C++ Compiler for Python 2.7... done!' | Tee-Object -Append -FilePath $install_log_path
 
 ## Download & install Chocolatey
-echo 'Installing Chocolatey' >> $provision
+echo 'Installing Chocolatey' | Tee-Object -Append -FilePath $install_log_path
 iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
 
 ## Install plaso dependencies
-Choco install patch -y >> $provision # Used when building plaso dependencies
-Choco install jre8 -y >> $provision   # Needed for jenkins client
-Choco install git -y >> $provision
-Choco install python2 -y >> $provision
+Choco install patch -y | Tee-Object -Append -FilePath $install_log_path # Used when building plaso dependencies
+Choco install jre8 -y | Tee-Object -Append -FilePath $install_log_path # Needed for jenkins client
+Choco install git -y --params '"/GitAndUnixToolsOnPath"' | Out-Null #Tee-Object -Append -FilePath $install_log_path
+Choco install python2 -y | Tee-Object -Append -FilePath $install_log_path
+# Pip package is broken as per 2017-07-14
+Choco install pip -y --allow-empty-checksums | Tee-Object -Append -FilePath $install_log_path
 
-pip.exe install wmi >> $provision
-pip.exe install pypiwin32  >> $provision
+c:\python27\scripts\pip.exe install wmi | Tee-Object -Append -FilePath $install_log_path
+c:\python27\scripts\pip.exe install pypiwin32 | Tee-Object -Append -FilePath $install_log_path
 
 ## Set up SSHd
-echo 'Installing SSHd' >> $provision
-Choco install openssh -y --force --params '"/SSHServerFeature"' >> $provision
-echo "Write public key to $($authorized_keys_path) file" >> $provision
+echo 'Installing SSHd' | Tee-Object -Append -FilePath $install_log_path
+Choco install openssh -y --force --params '"/SSHServerFeature"' | Tee-Object -Append -FilePath $install_log_path
+echo "Write public key to $($authorized_keys_path) file" | Tee-Object -Append -FilePath $install_log_path
 mkdir $ssh_user_directory
 $pub_key_content >> $authorized_keys_path
-echo 'Give read access to SSHd' >> $provision
+echo 'Give read access to SSHd' | Tee-Object -Append -FilePath $install_log_path
 $Acl = Get-Acl $authorized_keys_path
 $Ar = New-Object system.security.accesscontrol.filesystemaccessrule("NT SERVICES\sshd","Read","Allow")
 $Acl.SetAccessRule($Ar)
 Set-Acl $authorized_keys_path $Acl
-echo "New ACLs for $($authorized_keys_path):" >> $provision
-Get-Acl $authorized_keys_path >> $provision
+echo "New ACLs for $($authorized_keys_path):" | Tee-Object -Append -FilePath $install_log_path
+Get-Acl $authorized_keys_path | Tee-Object -Append -FilePath $install_log_path
 
-echo 'Downloading Jenkins client'  >> $provision
+echo 'Downloading Jenkins client' | Tee-Object -Append -FilePath $install_log_path
 mkdir $jenkins_home_directory
 (New-Object System.Net.WebClient).DownloadFile($jenkins_slave_url, $jenkins_slave_path)
 
+# Disable stupid UAC
+New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"  -Name EnableInstallerDetection -Value 0 -Force
