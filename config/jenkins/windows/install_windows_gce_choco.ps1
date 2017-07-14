@@ -42,8 +42,10 @@ Choco install patch -y | Tee-Object -Append -FilePath $install_log_path # Used w
 Choco install jre8 -y | Tee-Object -Append -FilePath $install_log_path # Needed for jenkins client
 Choco install git -y --params '"/GitAndUnixToolsOnPath"' | Out-Null #Tee-Object -Append -FilePath $install_log_path
 Choco install python2 -y | Tee-Object -Append -FilePath $install_log_path
+Choco install vcredist2010 -y | Tee-Object -Append -FilePath $install_log_path
 # Pip package is broken as per 2017-07-14
 Choco install pip -y --allow-empty-checksums | Tee-Object -Append -FilePath $install_log_path
+
 
 c:\python27\scripts\pip.exe install wmi | Tee-Object -Append -FilePath $install_log_path
 c:\python27\scripts\pip.exe install pypiwin32 | Tee-Object -Append -FilePath $install_log_path
