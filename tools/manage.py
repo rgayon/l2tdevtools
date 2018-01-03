@@ -6,6 +6,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import argparse
+import csv
+import gzip
+import io
 import json
 import logging
 import os
@@ -14,7 +17,10 @@ import re
 import sys
 import zlib
 
+from xml.etree import ElementTree
+
 from l2tdevtools import download_helper
+from l2tdevtools import versions
 
 
 class COPRProjectManager(object):
@@ -26,8 +32,16 @@ class COPRProjectManager(object):
       'https://copr.fedorainfracloud.org/api_2/projects?group={name:s}&'
       'name={project:s}')
 
+  _COPR_REPO_URL = (
+      'https://copr-be.cloud.fedoraproject.org/results/%40{name:s}/'
+      '{project:s}/fedora-26-i386')
+
+  _PRIMARY_XML_XPATH = (
+      './{http://linux.duke.edu/metadata/repo}data[@type="primary"]/'
+      '{http://linux.duke.edu/metadata/repo}location')
+
   def __init__(self, name):
-    """Initializes the COPR manager.
+    """Initializes a COPR manager.
 
     Args:
       name (str): name of the group.
@@ -54,65 +68,69 @@ class COPRProjectManager(object):
     kwargs = {
         'name': self._name,
         'project': project}
-    download_url = self._COPR_URL.format(**kwargs)
+    copr_repo_url = self._COPR_REPO_URL.format(**kwargs)
 
+    download_url = '/'.join([copr_repo_url, 'repodata', 'repomd.xml'])
     page_content = self._download_helper.DownloadPageContent(download_url)
     if not page_content:
-      logging.error('Unable to retrieve project information page content.')
+      logging.error('Unable to retrieve repomd.xml.')
       return
 
-    project_information = json.loads(page_content)
-    if not project_information:
-      logging.error('Unable to retrieve project information.')
+    repomd_xml = ElementTree.fromstring(page_content)
+    xml_elements = repomd_xml.findall(self._PRIMARY_XML_XPATH)
+    if not xml_elements or not xml_elements[0].items():
+      logging.error('Primary data type missing from repomd.xml.')
       return
 
-    projects = project_information.get('projects', None)
-    if len(projects) != 1:
+    href_value_tuple = xml_elements[0].items()[0]
+    if not href_value_tuple[1]:
+      logging.error('Primary data type missing from repomd.xml.')
       return
 
-    links = projects[0].get('_links', None)
-    if not links:
-      return
-
-    builds = links.get('builds', None)
-    if not builds:
-      return
-
-    builds_href = builds.get('href', None)
-    if not builds_href:
-      return
-
-    download_url = self._COPR_BASE_URL.format(builds_href)
-
-    page_content = self._download_helper.DownloadPageContent(download_url)
+    download_url = '/'.join([copr_repo_url, href_value_tuple[1]])
+    page_content = self._download_helper.DownloadPageContent(
+        download_url, encoding=None)
     if not page_content:
-      logging.error('Unable to retrieve builds information page content.')
+      _, _, download_url = download_url.rpartition('/')
+      logging.error('Unable to retrieve primary.xml.gz.')
       return
 
-    builds_information = json.loads(page_content)
-    if not builds_information:
-      logging.error('Unable to retrieve builds information.')
-      return
+    with gzip.GzipFile(fileobj=io.BytesIO(page_content)) as file_object:
+      page_content = file_object.read()
 
-    builds = builds_information.get('builds', None)
-    if not builds:
+    primary_xml = ElementTree.fromstring(page_content)
+    # Note explicitly checking xml.Element against None because of deprecation
+    # warning.
+    if primary_xml is None:
+      logging.error('Packages missing from primary.xml.')
       return
 
     packages = {}
-    for build_information in builds:
-      build = build_information.get('build', None)
-      if not build:
+    for project_xml in primary_xml:
+      arch_xml = project_xml.find('{http://linux.duke.edu/metadata/common}arch')
+      if arch_xml is None or arch_xml.text != 'src':
         continue
 
-      package_name = build.get('package_name', None)
-      package_version = build.get('package_version', None)
+      package_name_xml = project_xml.find(
+          '{http://linux.duke.edu/metadata/common}name')
+      package_version_xml = project_xml.find(
+          '{http://linux.duke.edu/metadata/common}version')
+      if package_name_xml is None or package_version_xml is None:
+        continue
+
+      package_name = package_name_xml.text
+      package_version = package_version_xml.attrib['ver']
+
       if not package_name or not package_version:
         continue
 
-      package_version, _, _ = package_version.rpartition('-')
-      # TODO: improve version check.
-      if package_name in packages and packages[package_name] > package_version:
-        continue
+      if package_name in packages:
+        package_version_tuple = package_version.split('.')
+        version_tuple = packages[package_name].split('.')
+        compare_result = versions.CompareVersions(
+            package_version_tuple, version_tuple)
+        if compare_result < 0:
+          continue
 
       packages[package_name] = package_version
 
@@ -129,7 +147,7 @@ class GithubRepoManager(object):
       'https://github.com/log2timeline/l2tbinaries')
 
   def __init__(self):
-    """Initializes the github reposistory manager."""
+    """Initializes a github reposistory manager."""
     super(GithubRepoManager, self).__init__()
     self._download_helper = download_helper.DownloadHelper('')
 
@@ -248,7 +266,7 @@ class LaunchpadPPAManager(object):
       '/trusty/main/source/Sources.gz')
 
   def __init__(self, name):
-    """Initializes the Launchpad PPA manager.
+    """Initializes a Launchpad PPA manager.
 
     Args:
       name (str): name of the PPA.
@@ -379,7 +397,7 @@ class PyPIManager(object):
       'XlsxWriter': 'XlsxWriter'}
 
   def __init__(self):
-    """Initializes the PyPI manager object."""
+    """Initializes a PyPI manager object."""
     super(PyPIManager, self).__init__()
     self._download_helper = download_helper.DownloadHelper('')
 
@@ -432,12 +450,12 @@ class PyPIManager(object):
     return packages
 
 
-class BinariesManager(object):
-  """Defines the binaries manager."""
+class PackagesManager(object):
+  """Manages packages across various repositories."""
 
   def __init__(self):
-    """Initializes the binaries manager object."""
-    super(BinariesManager, self).__init__()
+    """Initializes a packages manager."""
+    super(PackagesManager, self).__init__()
     self._copr_project_manager = COPRProjectManager('gift')
     self._github_repo_manager = GithubRepoManager()
     self._launchpad_ppa_manager = LaunchpadPPAManager('gift')
@@ -500,6 +518,57 @@ class BinariesManager(object):
       reference_packages[name] = version
 
     packages = self._copr_project_manager.GetPackages(project)
+    return self._ComparePackages(reference_packages, packages)
+
+  def CompareDirectoryWithCSV(self, reference_directory, csv_file):
+    """Compares a directory containing source packages with a CSV file.
+
+    Args:
+      reference_directory (str): path of the reference directory that contains
+          dpkg source packages.
+      csv_file (str): path of the CSV file.
+
+    Returns:
+      tuple: containing:
+
+        dict[str, str]: new package names and versions. New packages are those
+            that are present in the reference directory but not in the project.
+        dict[str, str]: newer existing package names and versions. Newer
+            existing packages are those that have a newer version in the
+            reference directory.
+    """
+    reference_packages = {}
+    for directory_entry in os.listdir(reference_directory):
+      # The directory contains various files and we are only interested
+      # in the source packages that use the naming convention:
+      # package-version-#.tar.gz
+      # package-version-#.zip
+      if (not directory_entry.endswith('.tar.gz') and
+          not directory_entry.endswith('.zip')):
+        continue
+
+      if (directory_entry.endswith('.debian.tar.gz') or
+          directory_entry.endswith('.orig.tar.gz') or
+          directory_entry.endswith('-1.tar.gz')):
+        continue
+
+      name, _, _ = directory_entry.rpartition('.')
+      if name.endswith('.tar'):
+        name, _, _ = name.rpartition('.')
+      name, _, version = name.rpartition('-')
+
+      if (name.endswith('-alpha') or
+          name.endswith('-beta') or
+          name.endswith('-experimental')):
+        name, _, _ = name.rpartition('-')
+
+      reference_packages[name] = version
+
+    packages = {}
+    with open(csv_file, 'r') as file_object:
+      for row in csv.DictReader(file_object):
+        packages[row['project']] = row['version']
+
     return self._ComparePackages(reference_packages, packages)
 
   def CompareDirectoryWithGithubRepo(self, reference_directory, sub_directory):
@@ -728,7 +797,7 @@ def Main():
     bool: True if successful or False if not.
   """
   actions = frozenset([
-      'copr-diff-dev', 'copr-diff-stable', 'copr-diff-testing',
+      'copr-diff-dev', 'copr-diff-stable', 'copr-diff-testing', 'csv-diff',
       'l2tbinaries-diff', 'launchpad-diff-dev', 'launchpad-diff-stable',
       'launchpad-diff-testing', 'pypi-diff'])
 
@@ -743,6 +812,11 @@ def Main():
       '--build-directory', '--build_directory', action='store',
       metavar='DIRECTORY', dest='build_directory', type=str,
       default='build', help='The location of the build directory.')
+
+  argument_parser.add_argument(
+      '--csv-file', '--csv_file', action='store', metavar='FILE',
+      dest='csv_file', type=str, default='', help=(
+          'The location of the CSV file.'))
 
   argument_parser.add_argument(
       '--machine-type', '--machine_type', action='store', metavar='TYPE',
@@ -766,7 +840,7 @@ def Main():
   # TODO: add l2tbinaries support.
   # TODO: add pypi support.
 
-  binaries_manager = BinariesManager()
+  packages_manager = PackagesManager()
 
   action_tuple = options.action.split('-')
 
@@ -777,7 +851,7 @@ def Main():
       reference_directory = options.build_directory
 
       new_packages, new_versions = (
-          binaries_manager.CompareDirectoryWithCOPRProject(
+          packages_manager.CompareDirectoryWithCOPRProject(
               reference_directory, track))
 
       diff_header = (
@@ -790,22 +864,32 @@ def Main():
       else:
         reference_track = 'dev'
 
-      new_packages, new_versions = binaries_manager.CompareCOPRProjects(
+      new_packages, new_versions = packages_manager.CompareCOPRProjects(
           reference_track, track)
 
       diff_header = (
           'Difference between COPR project: {0:s} and {1:s}'.format(
               reference_track, track))
 
+  elif action_tuple[0] == 'csv' and action_tuple[1] == 'diff':
+    reference_directory = options.build_directory
+
+    new_packages, new_versions = (
+        packages_manager.CompareDirectoryWithCSV(
+            reference_directory, options.csv_file))
+
+    diff_header = (
+        'Difference between: {0:s} and CSV'.format(reference_directory))
+
   elif action_tuple[0] == 'l2tbinaries' and action_tuple[1] == 'diff':
-    sub_directory = binaries_manager.GetMachineTypeSubDirectory(
+    sub_directory = packages_manager.GetMachineTypeSubDirectory(
         preferred_machine_type=options.machine_type)
 
     reference_directory = options.build_directory
 
     # TODO: compare from l2tbinaries git repo.
     new_packages, new_versions = (
-        binaries_manager.CompareDirectoryWithGithubRepo(
+        packages_manager.CompareDirectoryWithGithubRepo(
             reference_directory, sub_directory))
 
     diff_header = (
@@ -818,7 +902,7 @@ def Main():
       reference_directory = options.build_directory
 
       new_packages, new_versions = (
-          binaries_manager.CompareDirectoryWithLaunchpadPPATrack(
+          packages_manager.CompareDirectoryWithLaunchpadPPATrack(
               reference_directory, track))
 
       diff_header = (
@@ -831,7 +915,7 @@ def Main():
       else:
         reference_track = 'dev'
 
-      new_packages, new_versions = binaries_manager.CompareLaunchpadPPATracks(
+      new_packages, new_versions = packages_manager.CompareLaunchpadPPATracks(
           reference_track, track)
 
       diff_header = (
@@ -844,7 +928,7 @@ def Main():
     reference_directory = options.build_directory
 
     new_packages, new_versions = (
-        binaries_manager.CompareDirectoryWithPyPI(reference_directory))
+        packages_manager.CompareDirectoryWithPyPI(reference_directory))
 
     diff_header = (
         'Difference between: {0:s} and release'.format(reference_directory))
