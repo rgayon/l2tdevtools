@@ -40,86 +40,73 @@ class AppveyorYmlWriter(DependencyFileWriter):
 
   PATH = os.path.join('appveyor.yml')
 
-  _VERSION_PYWIN32 = '221'
-  _VERSION_WMI = '1.4.9'
   _VERSION_SQLITE = '3180000'
 
-  _DOWNLOAD_PIP = (
-      '  - ps: (new-object net.webclient).DownloadFile('
-      '\'https://bootstrap.pypa.io/get-pip.py\', '
-      '\'C:\\Projects\\get-pip.py\')')
+  _UPGRADE_PIP = (
+      '- cmd: "%PYTHON%\\\\Scripts\\\\pip.exe install --upgrade pip"')
 
-  _DOWNLOAD_PYWIN32 = (
-      '  - ps: (new-object net.webclient).DownloadFile('
-      '\'https://github.com/log2timeline/l2tbinaries/raw/master/win32/'
-      'pywin32-{0:s}.win32-py2.7.exe\', '
-      '\'C:\\Projects\\pywin32-{0:s}.win32-py2.7.exe\')').format(
-          _VERSION_PYWIN32)
+  _INSTALL_PYWIN32_WMI = (
+      '- cmd: "%PYTHON%\\\\Scripts\\\\pip.exe install pypiwin32 WMI"')
 
-  _DOWNLOAD_WMI = (
-      '  - ps: (new-object net.webclient).DownloadFile('
-      '\'https://github.com/log2timeline/l2tbinaries/raw/master/win32/'
-      'WMI-{0:s}.win32.exe\', \'C:\\Projects\\WMI-{0:s}.win32.exe\')').format(
-          _VERSION_WMI)
-
-  _INSTALL_PIP = (
-      '  - cmd: "%PYTHON%\\\\python.exe C:\\\\Projects\\\\get-pip.py"')
-
-  _INSTALL_PYWIN32 = (
-      '  - cmd: "%PYTHON%\\\\Scripts\\\\easy_install.exe '
-      'C:\\\\Projects\\\\pywin32-{0:s}.win32-py2.7.exe"').format(
-          _VERSION_PYWIN32)
-
-  _INSTALL_WMI = (
-      '  - cmd: "%PYTHON%\\\\Scripts\\\\easy_install.exe '
-      'C:\\\\Projects\\\\WMI-{0:s}.win32.exe"').format(_VERSION_WMI)
+  _POST_INSTALL_PYWIN32 = (
+      '- cmd: "%PYTHON%\\\\python.exe %PYTHON%\\\\Scripts\\\\'
+      'pywin32_postinstall.py -install"')
 
   _URL_L2TDEVTOOLS = 'https://github.com/log2timeline/l2tdevtools.git'
 
   _DOWNLOAD_L2TDEVTOOLS = (
-      '  - cmd: git clone {0:s} && move l2tdevtools ..\\'.format(
+      '- cmd: git clone {0:s} ..\\l2tdevtools'.format(
           _URL_L2TDEVTOOLS))
+
+  _L2TDEVTOOLS = [
+      _UPGRADE_PIP,
+      _INSTALL_PYWIN32_WMI,
+      _POST_INSTALL_PYWIN32,
+      _DOWNLOAD_L2TDEVTOOLS]
 
   _FILE_HEADER = [
       'environment:',
       '  matrix:',
-      '    - PYTHON: "C:\\\\Python27"',
+      '  - TARGET: python27',
+      '    PYTHON: "C:\\\\Python27"',
+      '  - TARGET: python36',
+      '    PYTHON: "C:\\\\Python36"',
+      '',
+      'matrix:',
+      '  allow_failures:',
+      '  - TARGET: python36',
       '',
       'install:',
-      ('  - cmd: \'"C:\\Program Files\\Microsoft SDKs\\Windows\\v7.1\\Bin\\'
-       'SetEnv.cmd" /x86 /release\''),
-      ('  - ps: "[System.Net.ServicePointManager]::SecurityProtocol = '
-       '[System.Net.SecurityProtocolType]::Tls12"'),
-      _DOWNLOAD_PIP,
-      _DOWNLOAD_PYWIN32,
-      _DOWNLOAD_WMI,
-      _INSTALL_PIP,
-      _INSTALL_PYWIN32,
-      _INSTALL_WMI,
-      _DOWNLOAD_L2TDEVTOOLS]
+      ('- cmd: \'"C:\\Program Files\\Microsoft SDKs\\Windows\\v7.1\\Bin\\'
+       'SetEnv.cmd" /x86 /release\'')]
+
+  _SET_TLS_VERSION = (
+      '- ps: "[System.Net.ServicePointManager]::SecurityProtocol = '
+      '[System.Net.SecurityProtocolType]::Tls12"')
 
   _DOWNLOAD_SQLITE = (
-      '  - ps: (new-object net.webclient).DownloadFile('
+      '- ps: (new-object net.webclient).DownloadFile('
       '\'https://www.sqlite.org/2017/sqlite-dll-win32-x86-{0:s}.zip\', '
       '\'C:\\Projects\\sqlite-dll-win32-x86-{0:s}.zip\')').format(
           _VERSION_SQLITE)
 
   _EXTRACT_SQLITE = (
-      '  - ps: $Output = Invoke-Expression -Command '
+      '- ps: $Output = Invoke-Expression -Command '
       '"& \'C:\\\\Program Files\\\\7-Zip\\\\7z.exe\' -y '
       '-oC:\\\\Projects\\\\ x C:\\\\Projects\\\\'
       'sqlite-dll-win32-x86-{0:s}.zip 2>&1"').format(_VERSION_SQLITE)
 
   _INSTALL_SQLITE = (
-      '  - cmd: copy C:\\Projects\\sqlite3.dll C:\\Python27\\DLLs\\')
+      '- cmd: copy C:\\Projects\\sqlite3.dll C:\\Python27\\DLLs\\')
 
   _SQLITE = [
+      _SET_TLS_VERSION,
       _DOWNLOAD_SQLITE,
       _EXTRACT_SQLITE,
       _INSTALL_SQLITE]
 
   _L2TDEVTOOLS_UPDATE = (
-      '  - cmd: mkdir dependencies && set PYTHONPATH=..\\l2tdevtools && '
+      '- cmd: mkdir dependencies && set PYTHONPATH=..\\l2tdevtools && '
       '"%PYTHON%\\\\python.exe" ..\\l2tdevtools\\tools\\update.py '
       '--download-directory dependencies --machine-type x86 '
       '--msi-targetdir "%PYTHON%" --track dev {0:s}')
@@ -129,7 +116,7 @@ class AppveyorYmlWriter(DependencyFileWriter):
       'build: off',
       '',
       'test_script:',
-      '  - "%PYTHON%\\\\python.exe run_tests.py"',
+      '- "%PYTHON%\\\\python.exe run_tests.py"',
       '']
 
   def Write(self):
@@ -146,7 +133,12 @@ class AppveyorYmlWriter(DependencyFileWriter):
     if 'pysqlite' in dependencies:
       file_content.extend(self._SQLITE)
 
-    dependencies = ' '.join(dependencies)
+    if self._project_definition.name == 'artifacts':
+      dependencies.append('yapf')
+
+    file_content.extend(self._L2TDEVTOOLS)
+
+    dependencies = ' '.join(sorted(dependencies))
     l2tdevtools_update = self._L2TDEVTOOLS_UPDATE.format(dependencies)
     file_content.append(l2tdevtools_update)
 
@@ -213,7 +205,7 @@ class DPKGControlWriter(DependencyFileWriter):
       'Section: python',
       'Priority: extra',
       'Maintainer: {maintainer:s}',
-      ('Build-Depends: debhelper (>= 7), python-all (>= 2.7~), '
+      ('Build-Depends: debhelper (>= 9), python-all (>= 2.7~), '
        'python-setuptools'),
       'Standards-Version: 3.9.5',
       'X-Python-Version: >= 2.7',
@@ -225,7 +217,7 @@ class DPKGControlWriter(DependencyFileWriter):
       'Section: python',
       'Priority: extra',
       'Maintainer: {maintainer:s}',
-      ('Build-Depends: debhelper (>= 7), python-all (>= 2.7~), '
+      ('Build-Depends: debhelper (>= 9), python-all (>= 2.7~), '
        'python-setuptools, python3-all (>= 3.4~), python3-setuptools'),
       'Standards-Version: 3.9.5',
       'X-Python-Version: >= 2.7',
@@ -566,6 +558,8 @@ class RequirementsWriter(DependencyFileWriter):
     for dependency in dependencies:
       file_content.append('{0:s}'.format(dependency))
 
+    file_content.append('')
+
     file_content = '\n'.join(file_content)
     file_content = file_content.encode('utf-8')
 
@@ -640,7 +634,7 @@ class TravisBeforeInstallScriptWriter(DependencyFileWriter):
       '#',
       '# Script to set up Travis-CI test VM.',
       '',
-      ('COVERALL_DEPENDENCIES="python-coverage python-coveralls '
+      ('COVERALLS_DEPENDENCIES="python-coverage python-coveralls '
        'python-docopt";'),
       '']
 
@@ -669,7 +663,7 @@ class TravisBeforeInstallScriptWriter(DependencyFileWriter):
       '\t# Only install the Python 2 dependencies.',
       ('\t# Also see: https://docs.travis-ci.com/user/languages/python/'
        '#Travis-CI-Uses-Isolated-virtualenvs'),
-      ('\tsudo apt-get install -y ${COVERALL_DEPENDENCIES} '
+      ('\tsudo apt-get install -y ${COVERALLS_DEPENDENCIES} '
        '${PYTHON2_DEPENDENCIES} ${PYTHON2_TEST_DEPENDENCIES};'),
       'fi',
       '']
@@ -686,12 +680,16 @@ class TravisBeforeInstallScriptWriter(DependencyFileWriter):
 
     file_content.append('')
 
-    if 'six' in dependencies:
-      file_content.append(
-          'L2TBINARIES_TEST_DEPENDENCIES="funcsigs mock pbr";')
-    else:
-      file_content.append(
-          'L2TBINARIES_TEST_DEPENDENCIES="funcsigs mock pbr six";')
+    test_dependencies = ['funcsigs', 'mock', 'pbr']
+    if 'six' not in dependencies:
+      test_dependencies.append('six')
+
+    if self._project_definition.name == 'artifacts':
+      test_dependencies.append('yapf')
+
+    test_dependencies = ' '.join(sorted(test_dependencies))
+    file_content.append('L2TBINARIES_TEST_DEPENDENCIES="{0:s}";'.format(
+        test_dependencies))
 
     file_content.append('')
 
@@ -702,7 +700,14 @@ class TravisBeforeInstallScriptWriter(DependencyFileWriter):
         python2_dependencies))
 
     file_content.append('')
-    file_content.append('PYTHON2_TEST_DEPENDENCIES="python-mock python-tox";')
+
+    test_dependencies = ['python-mock', 'python-tox']
+    if self._project_definition.name == 'artifacts':
+      test_dependencies.append('python-yapf')
+
+    test_dependencies = ' '.join(sorted(test_dependencies))
+    file_content.append('PYTHON2_TEST_DEPENDENCIES="{0:s}";'.format(
+        test_dependencies))
 
     file_content.extend(self._FILE_FOOTER)
 
@@ -727,9 +732,7 @@ class ToxIniWriter(DependencyFileWriter):
       'setenv =',
       '    PYTHONPATH = {{toxinidir}}',
       'deps =',
-      '    coverage',
-      '    mock',
-      '    pytest',
+      '{test_dependencies:s}',
       '    -rrequirements.txt',
       'commands =',
       '    ./run_tests.py',
@@ -740,8 +743,7 @@ class ToxIniWriter(DependencyFileWriter):
       '    PYTHONPATH = {{toxinidir}}',
       'deps =',
       '    coverage',
-      '    mock',
-      '    pytest',
+      '{test_dependencies:s}',
       '    -rrequirements.txt',
       'commands =',
       '    coverage erase',
@@ -751,7 +753,17 @@ class ToxIniWriter(DependencyFileWriter):
 
   def Write(self):
     """Writes a setup.cfg file."""
-    kwargs = {'project_name': self._project_definition.name}
+    test_dependencies = ['mock', 'pytest']
+    if self._project_definition.name == 'artifacts':
+      test_dependencies.append('yapf')
+
+    test_dependencies = '\n'.join([
+        '    {0:s}'.format(dependency) for dependency in test_dependencies])
+
+    kwargs = {
+        'project_name': self._project_definition.name,
+        'test_dependencies': test_dependencies}
+
     file_content = self._FILE_CONTENT.format(**kwargs)
 
     file_content = file_content.encode('utf-8')

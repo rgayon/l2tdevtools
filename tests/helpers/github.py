@@ -22,8 +22,7 @@ class GitHubHelperTest(unittest.TestCase):
         organization='test', project='test_project')
     helper._url_lib_helper = test_lib.TestURLLibHelper()
 
-    result = helper.CreatePullRequest(
-        'TOKEN', 1, 'origin', 'description')
+    result = helper.CreatePullRequest('TOKEN', 'origin', 'title', 'body')
     self.assertTrue(result)
 
   def testGetForkGitRepoUrl(self):
@@ -35,6 +34,8 @@ class GitHubHelperTest(unittest.TestCase):
     expected_url = u'https://github.com/test_user/test_project.git'
     url = helper.GetForkGitRepoUrl('test_user')
     self.assertEqual(url, expected_url)
+
+  # TODO: add tests for SetReviewer.
 
   def testQueryUser(self):
     """Tests the QueryUser function."""
